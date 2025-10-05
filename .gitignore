@@ -1,0 +1,10 @@
+build
+out
+.cache
+.idea
+.vs
+.vscode
+_deps
+resources
+new_rt
+.DS_Store
