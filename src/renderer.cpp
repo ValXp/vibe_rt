@@ -598,29 +598,6 @@ namespace {
         write_pixel(pixels, pixel_index(width, px, py), r, g, b, a);
     }
 
-    inline void draw_red_border(std::uint8_t* pixels, int width, int x0, int y0, int w, int h) {
-        if (w <= 0 || h <= 0) return;
-        // Top
-        int py = y0;
-        for (int px = x0; px < x0 + w; ++px) {
-            write_pixel(pixels, pixel_index(width, px, py), 255u, 0u, 0u, 255u);
-        }
-        // Bottom
-        if (h > 1) {
-            py = y0 + h - 1;
-            for (int px = x0; px < x0 + w; ++px) {
-                write_pixel(pixels, pixel_index(width, px, py), 255u, 0u, 0u, 255u);
-            }
-        }
-        // Left/Right
-        for (int py2 = y0; py2 < y0 + h; ++py2) {
-            write_pixel(pixels, pixel_index(width, x0, py2), 255u, 0u, 0u, 255u);
-            if (w > 1) {
-                write_pixel(pixels, pixel_index(width, x0 + w - 1, py2), 255u, 0u, 0u, 255u);
-            }
-        }
-    }
-
     inline void render_tile_interior(std::uint8_t* pixels,
                                      int width,
                                      int x0,
@@ -633,7 +610,6 @@ namespace {
                                      const Eye& eye,
                                      IModel& model,
                                      const Vector& light,
-                                     int ahead_pixels,
                                      const Vector& camRight,
                                      const Vector& camUp) {
         if (w <= 2 || h <= 2) return; // no interior
@@ -642,12 +618,6 @@ namespace {
         const int xe = x0 + w - 1;
         const int ye = y0 + h - 1;
         for (int py = y1; py < ye; ++py) {
-            // draw a green scanline ahead of the current row (snake head)
-            int pyLead = std::min(ye - 1, py + std::max(0, ahead_pixels));
-            //for (int px = x1; px < xe; ++px) {
-            //    write_pixel(pixels, pixel_index(width, px, pyLead), 0u, 255u, 0u, 255u);
-            //}
-            // shade this row, replacing the temporary green
             for (int px = x1; px < xe; ++px) {
                 shade_and_write_pixel(pixels, width, px, py, top_left, px_size_x, px_size_y, eye, model, light, camRight, camUp);
             }
@@ -701,7 +671,6 @@ struct Renderer::Context {
     std::atomic<int> tilesCompleted{0};
     std::atomic<bool> inProgress{false};
     std::atomic<std::uint64_t> renderVersion{0};
-    int aheadPixels = 1; // rows ahead for the green line indicator
     // camera state
     float yaw = 0.0f;   // radians
     float pitch = 0.0f; // radians
@@ -744,77 +713,6 @@ void Renderer::getCameraRotation(float& yaw, float& pitch) const {
 
 void Renderer::setCameraPosition(float x, float y, float z) {
     ctx->camPos = Vector(x, y, z);
-}
-
-void Renderer::getCameraPosition(float& x, float& y, float& z) const {
-    x = ctx->camPos.x; y = ctx->camPos.y; z = ctx->camPos.z;
-}
-
-void Renderer::renderToTexture(std::uint8_t* pixels, float x, float y, float z) {
-    static float angle = 0.f;
-    angle += .1f;
-    Eye eye(ctx->camPos);
-    // build camera basis from yaw/pitch (matrix)
-    const float yaw = ctx->yaw;
-    const float pitch = ctx->pitch;
-    Mat3 R = Mat3::fromYawPitch(yaw, pitch);
-    Vector forward = R.mul(Vector(0.f,0.f,1.f)).normalize();
-    Vector right   = R.mul(Vector(1.f,0.f,0.f)).normalize();
-    Vector up      = R.mul(Vector(0.f,1.f,0.f)).normalize();
-    // Compute image plane size from FOV/Aspect at focal distance z
-    const float fov_rad = ctx->screen->fov_y_deg * 3.1415926535f / 180.0f;
-    const float plane_h = 2.0f * z * std::tan(fov_rad * 0.5f);
-    const float plane_w = plane_h * ctx->screen->aspect;
-    const float px_size_x = plane_w / ctx->screen->resolution_x;
-    const float px_size_y = plane_h / ctx->screen->resolution_y;
-    // Image plane center at focal distance z, with camera-space pan offsets x,y
-    Vector center = eye.position + forward * z + right * x + up * y;
-    Vector top_left = center - right * (plane_w * 0.5f) - up * (plane_h * 0.5f);
-    ctx->screen->position = top_left;
-    Vector light(std::cos(angle) * 5.f, 0.f, std::sin(angle) * 5.f);
-    const int width = static_cast<int>(ctx->screen->resolution_x);
-    const int height = static_cast<int>(ctx->screen->resolution_y);
-    for (int py = 0; py < height; ++py) {
-        for (int px = 0; px < width; ++px) {
-            shade_and_write_pixel(pixels, width, px, py, top_left, px_size_x, px_size_y, eye, *ctx->model, light, right, up);
-        }
-    }
-}
-
-void Renderer::renderToTextureParallel(std::uint8_t* pixels, float x, float y, float z, ThreadPool& pool) {
-    static float angle = 0.f;
-    angle += .1f;
-    const float angleCopy = angle;
-    Eye eye(ctx->camPos);
-
-    // build camera basis from yaw/pitch via rotation matrix
-    const float yaw = ctx->yaw;
-    const float pitch = ctx->pitch;
-    Mat3 R = Mat3::fromYawPitch(yaw, pitch);
-    Vector forward = R.mul(Vector(0.f,0.f,1.f)).normalize();
-    Vector right   = R.mul(Vector(1.f,0.f,0.f)).normalize();
-    Vector up      = R.mul(Vector(0.f,1.f,0.f)).normalize();
-    const float fov_rad = ctx->screen->fov_y_deg * 3.1415926535f / 180.0f;
-    const float plane_h = 2.0f * z * std::tan(fov_rad * 0.5f);
-    const float plane_w = plane_h * ctx->screen->aspect;
-    const float px_size_x = plane_w / ctx->screen->resolution_x;
-    const float px_size_y = plane_h / ctx->screen->resolution_y;
-    Vector center = eye.position + forward * z + right * x + up * y;
-    Vector top_left = center - right * (plane_w * 0.5f) - up * (plane_h * 0.5f);
-    ctx->screen->position = top_left;
-    const int width = static_cast<int>(ctx->screen->resolution_x);
-    const int height = static_cast<int>(ctx->screen->resolution_y);
-    const Vector screen_pos = top_left;
-
-    for (int py = 0; py < height; ++py) {
-        pool.enqueue([this, pixels, py, width, px_size_x, px_size_y, screen_pos, angleCopy, eye, right, up]() {
-            Vector light(std::cos(angleCopy) * 5.f, 0.f, std::sin(angleCopy) * 5.f);
-            for (int px = 0; px < width; ++px) {
-                shade_and_write_pixel(pixels, width, px, py, screen_pos, px_size_x, px_size_y, eye, *ctx->model, light, right, up);
-            }
-        });
-    }
-    pool.wait();
 }
 
 void Renderer::startTiledRender(std::uint8_t* pixels, float x, float y, float z, ThreadPool& pool, int tileWidth, int tileHeight) {
@@ -864,13 +762,11 @@ void Renderer::startTiledRender(std::uint8_t* pixels, float x, float y, float z,
                 // Ensure this task is for the current render
                 if (ctx->renderVersion.load() != version) return;
                 Vector light(std::cos(angleCopy) * 5.f, 0.f, std::sin(angleCopy) * 5.f);
-                // 1) Red outline while processing
-                //draw_red_border(pixels, width, x0, y0, w, h);
                 if (ctx->renderVersion.load() != version) return;
-                // 2) Render interior first (keeps outline visible)
-                render_tile_interior(pixels, width, x0, y0, w, h, screen_pos, px_size_x, px_size_y, eye, *ctx->model, light, ctx->aheadPixels, right, up);
+                // Render interior first (keeps outline visible)
+                render_tile_interior(pixels, width, x0, y0, w, h, screen_pos, px_size_x, px_size_y, eye, *ctx->model, light, right, up);
                 if (ctx->renderVersion.load() != version) return;
-                // 3) Replace outline with shaded border
+                // Replace outline with shaded border
                 render_tile_border_shaded(pixels, width, x0, y0, w, h, screen_pos, px_size_x, px_size_y, eye, *ctx->model, light, right, up);
                 if (ctx->renderVersion.load() != version) return;
                 int done = ++ctx->tilesCompleted;
@@ -881,7 +777,5 @@ void Renderer::startTiledRender(std::uint8_t* pixels, float x, float y, float z,
         }
     }
 }
-
-bool Renderer::isRenderInProgress() const { return ctx->inProgress.load(); }
 
 bool Renderer::isRenderFinished() const { return !ctx->inProgress.load() && ctx->totalTiles > 0 && ctx->tilesCompleted.load() >= ctx->totalTiles; }
