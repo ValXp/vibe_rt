@@ -1,6 +1,9 @@
 #include "headers/renderer.h"
 #include "headers/obj_loader.h"
 #include "headers/thread_pool.hpp"
+#include "geometry/Intersection.h"
+#include "geometry/Ray.h"
+#include "geometry/TriangleIntersect.h"
 #include "math/Mat3.h"
 #include "math/Vector3.h"
 
@@ -18,6 +21,9 @@
 
 using math::Mat3;
 using math::Vector3;
+using geometry::Intersection;
+using geometry::Ray;
+using geometry::intersect_triangle_3;
 
 namespace {
     inline int pixel_index(int width, int px, int py) {
@@ -31,23 +37,6 @@ namespace {
         pixels[idx + 3] = static_cast<std::uint8_t>(a);
     }
 }
-
-class Ray {
-public:
-    Ray(const Vector3& position, const Vector3& direction)
-        : position(position), direction((direction - position).normalize()) {}
-    Vector3 position;
-    Vector3 direction;
-};
-
-class Intersection {
-public:
-    Intersection(): worldSpace(), texCoord(), index(0) {}
-    Intersection(const Vector3& worldSpace, const Vector3& texCoord): worldSpace(worldSpace), texCoord(texCoord), index(0) {}
-    Vector3 worldSpace;
-    Vector3 texCoord;
-    int index;
-};
 
 class IModel {
 public:
@@ -74,31 +63,6 @@ public:
     float aspect;     // width/height
     Vector3 position;  // stores top-left for debug
 };
-
-static bool intersect_triangle_3(const Vector3& v0, const Vector3& v1, const Vector3& v2, const Ray& ray, Intersection &intersection) {
-    const float kEpsilon= 0.0000001f;
-    Vector3 orig = ray.position;
-    Vector3 dir = ray.direction;
-    Vector3 v0v1 = v1 - v0;
-    Vector3 v0v2 = v2 - v0;
-    Vector3 pvec = dir.cross(v0v2);
-    float det = v0v1.dot(pvec);
-    if (std::fabs(det) < kEpsilon) return false;
-    float invDet = 1.0f / det;
-    Vector3 tvec = orig - v0;
-    float u = tvec.dot(pvec) * invDet;
-    if (u < 0.f || u > 1.f) return false;
-    Vector3 qvec = tvec.cross(v0v1);
-    float v = dir.dot(qvec) * invDet;
-    if (v < 0.f || u + v > 1.f) return false;
-    float t = v0v2.dot(qvec) * invDet;
-    intersection.texCoord.x = t;
-    intersection.texCoord.y = u;
-    intersection.texCoord.z = v;
-    // Store hit point in world space for shading
-    intersection.worldSpace = ray.position + ray.direction * t;
-    return true;
-}
 
 class Model : public IModel {
 public:
