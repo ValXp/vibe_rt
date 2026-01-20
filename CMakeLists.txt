@@ -48,9 +48,13 @@ add_library(vibe_app src/app/CameraController.cpp)
 target_include_directories(vibe_app PUBLIC src)
 target_compile_features(vibe_app PUBLIC cxx_std_17)
 
-add_executable(new_rt src/main.cpp src/renderer.cpp src/obj_loader.cpp)
+add_library(vibe_io src/obj_loader.cpp)
+target_include_directories(vibe_io PUBLIC src)
+target_compile_features(vibe_io PUBLIC cxx_std_17)
+
+add_executable(new_rt src/main.cpp src/renderer.cpp)
 target_include_directories(new_rt PRIVATE src)
-target_link_libraries(new_rt PRIVATE vibe_app vibe_render vibe_scene vibe_accel vibe_geometry vibe_math)
+target_link_libraries(new_rt PRIVATE vibe_io vibe_app vibe_render vibe_scene vibe_accel vibe_geometry vibe_math)
 
 # Require SFML 3 via Config package, fall back to FetchContent.
 find_package(SFML 3 CONFIG QUIET COMPONENTS Graphics Window System)
@@ -88,8 +92,9 @@ if(BUILD_TESTING)
     tests/test_bvh.cpp
     tests/test_tile_renderer.cpp
     tests/test_camera_controller.cpp
+    tests/test_obj_loader.cpp
   )
-  target_link_libraries(vibe_tests PRIVATE vibe_app vibe_render vibe_scene vibe_accel vibe_geometry vibe_math Catch2::Catch2WithMain)
+  target_link_libraries(vibe_tests PRIVATE vibe_io vibe_app vibe_render vibe_scene vibe_accel vibe_geometry vibe_math Catch2::Catch2WithMain)
   target_compile_features(vibe_tests PRIVATE cxx_std_17)
   include(Catch)
   catch_discover_tests(vibe_tests)
