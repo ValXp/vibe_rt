@@ -39,9 +39,14 @@ target_include_directories(vibe_accel PUBLIC src)
 target_link_libraries(vibe_accel PUBLIC vibe_geometry)
 target_compile_features(vibe_accel PUBLIC cxx_std_17)
 
+add_library(vibe_render src/render/TileRenderer.cpp)
+target_include_directories(vibe_render PUBLIC src)
+target_link_libraries(vibe_render PUBLIC vibe_scene vibe_geometry)
+target_compile_features(vibe_render PUBLIC cxx_std_17)
+
 add_executable(new_rt src/main.cpp src/renderer.cpp src/obj_loader.cpp)
 target_include_directories(new_rt PRIVATE src)
-target_link_libraries(new_rt PRIVATE vibe_scene vibe_accel vibe_geometry vibe_math)
+target_link_libraries(new_rt PRIVATE vibe_render vibe_scene vibe_accel vibe_geometry vibe_math)
 
 # Require SFML 3 via Config package, fall back to FetchContent.
 find_package(SFML 3 CONFIG QUIET COMPONENTS Graphics Window System)
@@ -77,8 +82,9 @@ if(BUILD_TESTING)
     tests/test_aabb.cpp
     tests/test_model.cpp
     tests/test_bvh.cpp
+    tests/test_tile_renderer.cpp
   )
-  target_link_libraries(vibe_tests PRIVATE vibe_scene vibe_accel vibe_geometry vibe_math Catch2::Catch2WithMain)
+  target_link_libraries(vibe_tests PRIVATE vibe_render vibe_scene vibe_accel vibe_geometry vibe_math Catch2::Catch2WithMain)
   target_compile_features(vibe_tests PRIVATE cxx_std_17)
   include(Catch)
   catch_discover_tests(vibe_tests)

@@ -1,13 +1,10 @@
 #include "headers/renderer.h"
 #include "headers/obj_loader.h"
 #include "headers/thread_pool.hpp"
-#include "accel/AABB.h"
-#include "accel/AABBIntersect.h"
 #include "accel/BVH.h"
-#include "geometry/Intersection.h"
-#include "geometry/Ray.h"
 #include "math/Mat3.h"
 #include "math/Vector3.h"
+#include "render/TileRenderer.h"
 #include "scene/IModel.h"
 #include "scene/Model.h"
 
@@ -25,34 +22,10 @@
 
 using math::Mat3;
 using math::Vector3;
-using geometry::Intersection;
-using geometry::Ray;
-using accel::AABB;
-using accel::intersect_aabb;
-using accel::intersect_aabb_t;
 using accel::BVH;
 using scene::IModel;
 using scene::Model;
-
-namespace {
-    inline int pixel_index(int width, int px, int py) {
-        return py * (width * 4) + px * 4;
-    }
-
-    inline void write_pixel(std::uint8_t* pixels, int idx, unsigned r, unsigned g, unsigned b, unsigned a) {
-        pixels[idx + 0] = static_cast<std::uint8_t>(r);
-        pixels[idx + 1] = static_cast<std::uint8_t>(g);
-        pixels[idx + 2] = static_cast<std::uint8_t>(b);
-        pixels[idx + 3] = static_cast<std::uint8_t>(a);
-    }
-}
-
-class Eye {
-public:
-    Eye(float x, float y, float z): position(x, y, z) {}
-    Eye(const Vector3 &p): position(p) {}
-    Vector3 position;
-};
+using render::TileRenderer;
 
 class Screen {
 public:
@@ -72,93 +45,7 @@ public:
 
 // BVH moved to accel module.
 
-namespace {
-    inline void shade_and_write_pixel(std::uint8_t* pixels,
-                                      int width,
-                                      int px,
-                                      int py,
-                                      const Vector3& top_left,
-                                      float px_size_x,
-                                      float px_size_y,
-                                      const Eye& eye,
-                                      IModel& model,
-                                      const Vector3& light,
-                                      const Vector3& camRight,
-                                      const Vector3& camUp) {
-        Vector3 direction = top_left + camRight * (px * px_size_x) + camUp * (py * px_size_y);
-        Ray ray(eye.position, direction);
-        Intersection intersection;
-        unsigned int r = 50u, g = 50u, b = 70u, a = 255u;
-        if (model.intersect(ray, intersection)) {
-            float shade = model.shade(intersection, light);
-            r = 15u + static_cast<unsigned int>(150u * shade);
-            g = 5u + static_cast<unsigned int>(50u * shade);
-            b = 25u + static_cast<unsigned int>(200u * shade);
-            a = 255u;
-        }
-        write_pixel(pixels, pixel_index(width, px, py), r, g, b, a);
-    }
-
-    inline void render_tile_interior(std::uint8_t* pixels,
-                                     int width,
-                                     int x0,
-                                     int y0,
-                                     int w,
-                                     int h,
-                                     const Vector3& top_left,
-                                     float px_size_x,
-                                     float px_size_y,
-                                     const Eye& eye,
-                                     IModel& model,
-                                     const Vector3& light,
-                                     const Vector3& camRight,
-                                     const Vector3& camUp) {
-        if (w <= 2 || h <= 2) return; // no interior
-        const int x1 = x0 + 1;
-        const int y1 = y0 + 1;
-        const int xe = x0 + w - 1;
-        const int ye = y0 + h - 1;
-        for (int py = y1; py < ye; ++py) {
-            for (int px = x1; px < xe; ++px) {
-                shade_and_write_pixel(pixels, width, px, py, top_left, px_size_x, px_size_y, eye, model, light, camRight, camUp);
-            }
-        }
-    }
-
-    inline void render_tile_border_shaded(std::uint8_t* pixels,
-                                          int width,
-                                          int x0,
-                                          int y0,
-                                          int w,
-                                          int h,
-                                          const Vector3& top_left,
-                                          float px_size_x,
-                                          float px_size_y,
-                                          const Eye& eye,
-                                          IModel& model,
-                                          const Vector3& light,
-                                          const Vector3& camRight,
-                                          const Vector3& camUp) {
-        if (w <= 0 || h <= 0) return;
-        // Top row
-        for (int px = x0; px < x0 + w; ++px) {
-            shade_and_write_pixel(pixels, width, px, y0, top_left, px_size_x, px_size_y, eye, model, light, camRight, camUp);
-        }
-        // Bottom row
-        if (h > 1) {
-            for (int px = x0; px < x0 + w; ++px) {
-                shade_and_write_pixel(pixels, width, px, y0 + h - 1, top_left, px_size_x, px_size_y, eye, model, light, camRight, camUp);
-            }
-        }
-        // Left/Right columns (excluding corners to avoid duplicate work)
-        for (int py = y0 + 1; py < y0 + h - 1; ++py) {
-            shade_and_write_pixel(pixels, width, x0, py, top_left, px_size_x, px_size_y, eye, model, light, camRight, camUp);
-            if (w > 1) {
-                shade_and_write_pixel(pixels, width, x0 + w - 1, py, top_left, px_size_x, px_size_y, eye, model, light, camRight, camUp);
-            }
-        }
-    }
-}
+// Tile rendering helpers moved to render module.
 
 struct Renderer::Context {
     Screen* screen = nullptr;
@@ -229,7 +116,7 @@ void Renderer::startTiledRender(std::uint8_t* pixels, float x, float y, float z,
     static float angle = 0.f;
     angle += .1f;
     const float angleCopy = angle;
-    Eye eye(ctx->camPos);
+    const Vector3 eyePos = ctx->camPos;
 
     const float yaw = ctx->yaw;
     const float pitch = ctx->pitch;
@@ -242,7 +129,7 @@ void Renderer::startTiledRender(std::uint8_t* pixels, float x, float y, float z,
     const float plane_w = plane_h * ctx->screen->aspect;
     const float px_size_x = plane_w / ctx->screen->resolution_x;
     const float px_size_y = plane_h / ctx->screen->resolution_y;
-    Vector3 center = eye.position + forward * z + right * x + up * y;
+    Vector3 center = eyePos + forward * z + right * x + up * y;
     Vector3 top_left = center - right * (plane_w * 0.5f) - up * (plane_h * 0.5f);
     ctx->screen->position = top_left;
     const int width = static_cast<int>(ctx->screen->resolution_x);
@@ -259,16 +146,21 @@ void Renderer::startTiledRender(std::uint8_t* pixels, float x, float y, float z,
             const int y0 = ty * tileHeight;
             const int w = std::min(tileWidth, width - x0);
             const int h = std::min(tileHeight, height - y0);
-            pool.enqueue([this, pixels, x0, y0, w, h, width, px_size_x, px_size_y, screen_pos, angleCopy, eye, version, right, up]() {
+            pool.enqueue([this, pixels, x0, y0, w, h, width, px_size_x, px_size_y,
+                          screen_pos, angleCopy, eyePos, version, right, up]() {
                 // Ensure this task is for the current render
                 if (ctx->renderVersion.load() != version) return;
                 Vector3 light(std::cos(angleCopy) * 5.f, 0.f, std::sin(angleCopy) * 5.f);
                 if (ctx->renderVersion.load() != version) return;
                 // Render interior first (keeps outline visible)
-                render_tile_interior(pixels, width, x0, y0, w, h, screen_pos, px_size_x, px_size_y, eye, *ctx->model, light, right, up);
+                TileRenderer::renderTileInterior(pixels, width, x0, y0, w, h, screen_pos,
+                                                 px_size_x, px_size_y, eyePos, *ctx->model,
+                                                 light, right, up);
                 if (ctx->renderVersion.load() != version) return;
                 // Replace outline with shaded border
-                render_tile_border_shaded(pixels, width, x0, y0, w, h, screen_pos, px_size_x, px_size_y, eye, *ctx->model, light, right, up);
+                TileRenderer::renderTileBorderShaded(pixels, width, x0, y0, w, h, screen_pos,
+                                                     px_size_x, px_size_y, eyePos, *ctx->model,
+                                                     light, right, up);
                 if (ctx->renderVersion.load() != version) return;
                 int done = ++ctx->tilesCompleted;
                 if (done >= ctx->totalTiles) {

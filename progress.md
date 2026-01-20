@@ -5,3 +5,4 @@
 2026-01-19 21:09 | done | Extract AABB helpers and tests
 2026-01-19 21:13 | done | Extract scene model and shading tests
 2026-01-19 21:20 | done | Extract BVH module and tests
+2026-01-19 21:24 | done | Extract tile renderer helpers and tests
