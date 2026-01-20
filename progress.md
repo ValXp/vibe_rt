@@ -3,3 +3,4 @@
 2026-01-19 21:04 | done | Extract math primitives and add Catch2 tests
 2026-01-19 21:07 | done | Extract geometry primitives and tests
 2026-01-19 21:09 | done | Extract AABB helpers and tests
+2026-01-19 21:13 | done | Extract scene model and shading tests
