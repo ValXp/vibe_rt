@@ -2,7 +2,9 @@
 #include <iostream>
 #include <cstdint>
 #include <cmath>
+#include <filesystem>
 #include <optional>
+#include <string>
 
 #include "app/CameraController.h"
 #include "headers/renderer.h"
@@ -12,6 +14,16 @@ const uint height = 1000;
 const uint width = 1000;
 
 namespace {
+
+void print_usage(const char* prog) {
+    std::cout << "Usage: " << prog << " [path/to/model.obj]\n";
+}
+
+std::string resolve_obj_path(int argc, char** argv) {
+    if (argc > 2) return "";
+    if (argc == 2) return argv[1];
+    return "resources/bunny_smooth.obj";
+}
 
 std::optional<app::Key> mapKey(sf::Keyboard::Key key) {
     switch (key) {
@@ -39,7 +51,7 @@ std::optional<app::MouseButton> mapButton(sf::Mouse::Button button) {
 
 }  // namespace
 
-int main()
+int main(int argc, char** argv)
 {
 #ifdef __ARM_NEON__
     std::cout << "__ARM_NEON__" << std::endl;
@@ -47,19 +59,33 @@ int main()
 #ifdef TARGET_FEATURE_NEON
     std::cout << "TARGET_FEATURE_NEON" << std::endl;
 #endif
+    const char* prog = (argc > 0 && argv && argv[0]) ? argv[0] : "new_rt";
+    const std::string objPath = resolve_obj_path(argc, argv);
+    if (objPath.empty()) {
+        print_usage(prog);
+        return EXIT_FAILURE;
+    }
+    if (!std::filesystem::exists(objPath) || !std::filesystem::is_regular_file(objPath)) {
+        std::cerr << "OBJ not found: " << objPath << "\n";
+        print_usage(prog);
+        return EXIT_FAILURE;
+    }
+    std::cout << "Loading OBJ: " << objPath << "\n";
     sf::RenderWindow window(sf::VideoMode{sf::Vector2u{width, height}}, "CMake SFML Project");
     window.setFramerateLimit(144);
     Renderer renderer;
     ThreadPool pool; // defaults to hardware_concurrency
-    renderer.init(width, height, "resources/bunny_smooth.obj");
+    std::cout << "ThreadPool threads: " << pool.thread_count() << "\n";
+    renderer.init(width, height, objPath);
     auto* pixels = new std::uint8_t[width * height * 4];
     sf::Texture screenText(sf::Vector2u{width, height});
     screenText.setRepeated(false);
     sf::Sprite sprite{screenText};
     sprite.setTextureRect(sf::IntRect(sf::Vector2i{0, static_cast<int>(height)},
                                       sf::Vector2i{static_cast<int>(width), -static_cast<int>(height)}));
-    app::CameraController controller(-1.9f, -2.2f, 2.7f);
-    controller.setCameraPosition(0.0f, 0.0f, 0.0f);
+    app::CameraController controller(0.0f, 0.0f, 2.5f);
+    controller.setCameraPosition(0.0f, 0.0f, 6.0f);
+    controller.setCameraRotation(3.14159265f, 0.0f);
     const int tileW = 64;
     const int tileH = 64;
     while (window.isOpen())

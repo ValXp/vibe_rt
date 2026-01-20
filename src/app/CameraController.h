@@ -36,6 +36,7 @@ public:
     CameraController(float planeX, float planeY, float planeZ);
 
     void setCameraPosition(float x, float y, float z);
+    void setCameraRotation(float yawRadians, float pitchRadians);
     void handleKeyPressed(Key key);
     void handleKeyReleased(Key key);
     void handleMousePressed(MouseButton button, int x, int y);

@@ -13,6 +13,13 @@ void CameraController::setCameraPosition(float x, float y, float z) {
     camZ = z;
 }
 
+void CameraController::setCameraRotation(float yawRadians, float pitchRadians) {
+    yaw = yawRadians;
+    pitch = pitchRadians;
+    clampPitch();
+    renderRequested = true;
+}
+
 void CameraController::handleKeyPressed(Key key) {
     setMoveKey(key, true);
 }

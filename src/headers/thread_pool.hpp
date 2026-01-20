@@ -55,6 +55,10 @@ public:
         // don't notify cv_done_ here; running tasks will update as they finish
     }
 
+    std::size_t thread_count() const {
+        return workers_.size();
+    }
+
 private:
     void worker_loop_() {
         while (true) {
