@@ -33,6 +33,7 @@ target_compile_features(vibe_scene PUBLIC cxx_std_17)
 add_library(vibe_accel
   src/accel/AABB.cpp
   src/accel/AABBIntersect.cpp
+  src/accel/BVH.cpp
 )
 target_include_directories(vibe_accel PUBLIC src)
 target_link_libraries(vibe_accel PUBLIC vibe_geometry)
@@ -75,6 +76,7 @@ if(BUILD_TESTING)
     tests/test_geometry.cpp
     tests/test_aabb.cpp
     tests/test_model.cpp
+    tests/test_bvh.cpp
   )
   target_link_libraries(vibe_tests PRIVATE vibe_scene vibe_accel vibe_geometry vibe_math Catch2::Catch2WithMain)
   target_compile_features(vibe_tests PRIVATE cxx_std_17)
