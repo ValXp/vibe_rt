@@ -1,6 +1,8 @@
 #include "headers/renderer.h"
 #include "headers/obj_loader.h"
 #include "headers/thread_pool.hpp"
+#include "accel/AABB.h"
+#include "accel/AABBIntersect.h"
 #include "geometry/Intersection.h"
 #include "geometry/Ray.h"
 #include "geometry/TriangleIntersect.h"
@@ -24,6 +26,9 @@ using math::Vector3;
 using geometry::Intersection;
 using geometry::Ray;
 using geometry::intersect_triangle_3;
+using accel::AABB;
+using accel::intersect_aabb;
+using accel::intersect_aabb_t;
 
 namespace {
     inline int pixel_index(int width, int px, int py) {
@@ -150,58 +155,7 @@ public:
     std::vector<int> normalIndices;
 };
 
-// Simple AABB for BVH
-struct AABB {
-    Vector3 min{1e30f, 1e30f, 1e30f};
-    Vector3 max{-1e30f, -1e30f, -1e30f};
-    void expand(const Vector3& p) {
-        if (p.x < min.x) min.x = p.x; if (p.x > max.x) max.x = p.x;
-        if (p.y < min.y) min.y = p.y; if (p.y > max.y) max.y = p.y;
-        if (p.z < min.z) min.z = p.z; if (p.z > max.z) max.z = p.z;
-    }
-    void expand(const AABB& b) {
-        expand(b.min);
-        expand(b.max);
-    }
-};
-
-static inline bool intersect_aabb(const AABB& box, const Ray& ray, float tmin = 0.0f, float tmax = 1e30f) {
-    // Slabs method
-    const float dirx = ray.direction.x == 0 ? 1e-30f : ray.direction.x;
-    const float diry = ray.direction.y == 0 ? 1e-30f : ray.direction.y;
-    const float dirz = ray.direction.z == 0 ? 1e-30f : ray.direction.z;
-
-    float invx = 1.0f / dirx; float tx1 = (box.min.x - ray.position.x) * invx; float tx2 = (box.max.x - ray.position.x) * invx;
-    float invy = 1.0f / diry; float ty1 = (box.min.y - ray.position.y) * invy; float ty2 = (box.max.y - ray.position.y) * invy;
-    float invz = 1.0f / dirz; float tz1 = (box.min.z - ray.position.z) * invz; float tz2 = (box.max.z - ray.position.z) * invz;
-
-    float tminx = std::min(tx1, tx2); float tmaxx = std::max(tx1, tx2);
-    float tminy = std::min(ty1, ty2); float tmaxy = std::max(ty1, ty2);
-    float tminz = std::min(tz1, tz2); float tmaxz = std::max(tz1, tz2);
-
-    tmin = std::max(tmin, std::max(tminx, std::max(tminy, tminz)));
-    tmax = std::min(tmax, std::min(tmaxx, std::min(tmaxy, tmaxz)));
-
-    return tmax >= tmin && tmax >= 0.0f;
-}
-
-static inline bool intersect_aabb_t(const AABB& box, const Ray& ray, float tmaxIn, float& outTmin) {
-    float tmin = 0.0f;
-    float tmax = tmaxIn;
-    const float dirx = (ray.direction.x == 0.f) ? 1e-30f : ray.direction.x;
-    const float diry = (ray.direction.y == 0.f) ? 1e-30f : ray.direction.y;
-    const float dirz = (ray.direction.z == 0.f) ? 1e-30f : ray.direction.z;
-    float invx = 1.0f / dirx; float tx1 = (box.min.x - ray.position.x) * invx; float tx2 = (box.max.x - ray.position.x) * invx;
-    float invy = 1.0f / diry; float ty1 = (box.min.y - ray.position.y) * invy; float ty2 = (box.max.y - ray.position.y) * invy;
-    float invz = 1.0f / dirz; float tz1 = (box.min.z - ray.position.z) * invz; float tz2 = (box.max.z - ray.position.z) * invz;
-    float tminx = std::min(tx1, tx2); float tmaxx = std::max(tx1, tx2);
-    float tminy = std::min(ty1, ty2); float tmaxy = std::max(ty1, ty2);
-    float tminz = std::min(tz1, tz2); float tmaxz = std::max(tz1, tz2);
-    tmin = std::max(tmin, std::max(tminx, std::max(tminy, tminz)));
-    tmax = std::min(tmax, std::min(tmaxx, std::min(tmaxy, tmaxz)));
-    outTmin = tmin;
-    return tmax >= tmin && tmax >= 0.0f;
-}
+// AABB and slab helpers moved to accel module.
 
 class BVH : public IModel {
 public:

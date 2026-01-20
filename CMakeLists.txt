@@ -25,9 +25,17 @@ target_include_directories(vibe_geometry PUBLIC src)
 target_link_libraries(vibe_geometry PUBLIC vibe_math)
 target_compile_features(vibe_geometry PUBLIC cxx_std_17)
 
+add_library(vibe_accel
+  src/accel/AABB.cpp
+  src/accel/AABBIntersect.cpp
+)
+target_include_directories(vibe_accel PUBLIC src)
+target_link_libraries(vibe_accel PUBLIC vibe_geometry)
+target_compile_features(vibe_accel PUBLIC cxx_std_17)
+
 add_executable(new_rt src/main.cpp src/renderer.cpp src/obj_loader.cpp)
 target_include_directories(new_rt PRIVATE src)
-target_link_libraries(new_rt PRIVATE vibe_geometry vibe_math)
+target_link_libraries(new_rt PRIVATE vibe_accel vibe_geometry vibe_math)
 
 # Require SFML 3 via Config package, fall back to FetchContent.
 find_package(SFML 3 CONFIG QUIET COMPONENTS Graphics Window System)
@@ -57,8 +65,12 @@ if(BUILD_TESTING)
     GIT_TAG v3.5.4
   )
   FetchContent_MakeAvailable(Catch2)
-  add_executable(vibe_tests tests/test_math.cpp tests/test_geometry.cpp)
-  target_link_libraries(vibe_tests PRIVATE vibe_geometry vibe_math Catch2::Catch2WithMain)
+  add_executable(vibe_tests
+    tests/test_math.cpp
+    tests/test_geometry.cpp
+    tests/test_aabb.cpp
+  )
+  target_link_libraries(vibe_tests PRIVATE vibe_accel vibe_geometry vibe_math Catch2::Catch2WithMain)
   target_compile_features(vibe_tests PRIVATE cxx_std_17)
   include(Catch)
   catch_discover_tests(vibe_tests)
