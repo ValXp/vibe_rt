@@ -32,6 +32,22 @@ The executable will be at:
 build/bin/new_rt
 ```
 
+## Module layout
+
+- `src/math`: vector/matrix primitives.
+- `src/geometry`: rays, intersections, triangle tests.
+- `src/accel`: AABB, BVH, intersection helpers.
+- `src/scene`: model data + shading.
+- `src/render`: tile rendering helpers.
+- `src/app`: camera controller and input mapping.
+- `src/obj_loader.cpp`: OBJ parsing (IO layer).
+
+## Tests
+
+```bash
+ctest --test-dir build
+```
+
 ## Notes
 
 - If you already have SFML 3 installed via your system or package manager, CMake will use it.
