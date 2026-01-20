@@ -8,3 +8,4 @@
 2026-01-19 21:24 | done | Extract tile renderer helpers and tests
 2026-01-19 21:28 | done | Add camera controller and tests
 2026-01-19 21:31 | done | Clean up ObjLoader and add tests
+2026-01-19 21:36 | done | Refactor renderer helpers into smaller functions

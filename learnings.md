@@ -5,3 +5,4 @@
 - Gotcha: Catch2 v3 needs `#include <catch2/catch_approx.hpp>` for `Catch::Approx`.
 - Gotcha: TileRenderer extraction requires capturing `eyePos` in the render task lambda.
 - FYI: ObjLoader tests link through `vibe_io` to avoid missing symbols.
+- Gotcha: Renderer helpers need friend access to `Renderer::Context` for refactor helpers.

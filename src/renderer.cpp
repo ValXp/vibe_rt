@@ -65,6 +65,142 @@ struct Renderer::Context {
     Vector3 camPos = Vector3(0.f, 0.f, 0.f);
 };
 
+struct RenderHelpers {
+    struct CameraBasis {
+    Vector3 forward;
+    Vector3 right;
+    Vector3 up;
+    };
+
+    struct RenderSetup {
+    Vector3 screenPos;
+    Vector3 right;
+    Vector3 up;
+    Vector3 eyePos;
+    float pxSizeX = 0.0f;
+    float pxSizeY = 0.0f;
+    int width = 0;
+    int height = 0;
+    float angle = 0.0f;
+    };
+
+    static Screen* createScreen(unsigned int width, unsigned int height) {
+        return new Screen(60.0f, static_cast<int>(width), static_cast<int>(height), Vector3(0, 0, 0));
+    }
+
+    static std::unique_ptr<IModel> loadModel(const std::string& objPath) {
+        ObjData data = ObjLoader::parse(objPath);
+        Model base(std::move(data.vertices), std::move(data.indices),
+                   std::move(data.normals), std::move(data.normalIndices));
+        ThreadPool pool;
+        return std::make_unique<BVH>(base, pool);
+    }
+
+    static CameraBasis computeCameraBasis(float yaw, float pitch) {
+        Mat3 rotation = Mat3::fromYawPitch(yaw, pitch);
+        CameraBasis basis;
+        basis.forward = rotation.mul(Vector3(0.f, 0.f, 1.f)).normalize();
+        basis.right = rotation.mul(Vector3(1.f, 0.f, 0.f)).normalize();
+        basis.up = rotation.mul(Vector3(0.f, 1.f, 0.f)).normalize();
+        return basis;
+    }
+
+    static RenderSetup computeRenderSetup(Renderer::Context* ctx, float x, float y, float z) {
+        static float angle = 0.f;
+        angle += 0.1f;
+        RenderSetup setup;
+        setup.angle = angle;
+        setup.eyePos = ctx->camPos;
+        CameraBasis basis = computeCameraBasis(ctx->yaw, ctx->pitch);
+        setup.right = basis.right;
+        setup.up = basis.up;
+        const float fov_rad = ctx->screen->fov_y_deg * 3.1415926535f / 180.0f;
+        const float plane_h = 2.0f * z * std::tan(fov_rad * 0.5f);
+        const float plane_w = plane_h * ctx->screen->aspect;
+        setup.pxSizeX = plane_w / ctx->screen->resolution_x;
+        setup.pxSizeY = plane_h / ctx->screen->resolution_y;
+        Vector3 center = setup.eyePos + basis.forward * z + basis.right * x + basis.up * y;
+        setup.screenPos = center - basis.right * (plane_w * 0.5f) - basis.up * (plane_h * 0.5f);
+        ctx->screen->position = setup.screenPos;
+        setup.width = static_cast<int>(ctx->screen->resolution_x);
+        setup.height = static_cast<int>(ctx->screen->resolution_y);
+        return setup;
+    }
+
+    static std::uint64_t beginRender(Renderer::Context* ctx, ThreadPool& pool, int tileWidth, int tileHeight) {
+        std::uint64_t version = ctx->renderVersion.fetch_add(1) + 1;
+        ctx->inProgress.store(true);
+        ctx->tilesCompleted.store(0);
+        ctx->tileWidth = tileWidth;
+        ctx->tileHeight = tileHeight;
+        pool.clear();
+        return version;
+    }
+
+    static void updateTileGrid(Renderer::Context* ctx, int width, int height, int tileWidth, int tileHeight) {
+        ctx->tilesX = (width + tileWidth - 1) / tileWidth;
+        ctx->tilesY = (height + tileHeight - 1) / tileHeight;
+        ctx->totalTiles = ctx->tilesX * ctx->tilesY;
+    }
+
+    static void renderTileTask(Renderer::Context* ctx,
+                               std::uint8_t* pixels,
+                               int width,
+                               int x0,
+                               int y0,
+                               int w,
+                               int h,
+                               const RenderSetup& setup,
+                               std::uint64_t version) {
+        if (ctx->renderVersion.load() != version) return;
+        Vector3 light(std::cos(setup.angle) * 5.f, 0.f, std::sin(setup.angle) * 5.f);
+        if (ctx->renderVersion.load() != version) return;
+        TileRenderer::renderTileInterior(pixels, width, x0, y0, w, h, setup.screenPos,
+                                         setup.pxSizeX, setup.pxSizeY, setup.eyePos,
+                                         *ctx->model, light, setup.right, setup.up);
+        if (ctx->renderVersion.load() != version) return;
+        TileRenderer::renderTileBorderShaded(pixels, width, x0, y0, w, h, setup.screenPos,
+                                             setup.pxSizeX, setup.pxSizeY, setup.eyePos,
+                                             *ctx->model, light, setup.right, setup.up);
+        if (ctx->renderVersion.load() != version) return;
+        int done = ++ctx->tilesCompleted;
+        if (done >= ctx->totalTiles) {
+            ctx->inProgress.store(false);
+        }
+    }
+
+    static void enqueueTile(Renderer::Context* ctx,
+                            ThreadPool& pool,
+                            std::uint8_t* pixels,
+                            int width,
+                            int x0,
+                            int y0,
+                            int w,
+                            int h,
+                            const RenderSetup& setup,
+                            std::uint64_t version) {
+        pool.enqueue([ctx, pixels, width, x0, y0, w, h, setup, version]() {
+            renderTileTask(ctx, pixels, width, x0, y0, w, h, setup, version);
+        });
+    }
+
+    static void enqueueTiles(Renderer::Context* ctx,
+                             ThreadPool& pool,
+                             std::uint8_t* pixels,
+                             const RenderSetup& setup,
+                             std::uint64_t version) {
+        for (int ty = 0; ty < ctx->tilesY; ++ty) {
+            for (int tx = 0; tx < ctx->tilesX; ++tx) {
+                int x0 = tx * ctx->tileWidth;
+                int y0 = ty * ctx->tileHeight;
+                int w = std::min(ctx->tileWidth, setup.width - x0);
+                int h = std::min(ctx->tileHeight, setup.height - y0);
+                enqueueTile(ctx, pool, pixels, setup.width, x0, y0, w, h, setup, version);
+            }
+        }
+    }
+};
+
 Renderer::Renderer() : ctx(new Context()) {}
 
 Renderer::~Renderer() {
@@ -77,13 +213,8 @@ Renderer::~Renderer() {
 }
 
 void Renderer::init(unsigned int width, unsigned int height, const std::string& objPath) {
-    ctx->screen = new Screen(60.0f, static_cast<int>(width), static_cast<int>(height), Vector3(0, 0, 0));
-    ObjData data = ObjLoader::parse(objPath);
-    // Build BVH with a temporary thread pool for speed
-    Model base(std::move(data.vertices), std::move(data.indices), std::move(data.normals), std::move(data.normalIndices));
-    ThreadPool pool; // local pool for BVH construction
-    auto bvh = std::make_unique<BVH>(base, pool);
-    ctx->model = std::move(bvh);
+    ctx->screen = RenderHelpers::createScreen(width, height);
+    ctx->model = RenderHelpers::loadModel(objPath);
 }
 
 void Renderer::setCameraRotation(float yaw, float pitch) {
@@ -104,71 +235,10 @@ void Renderer::setCameraPosition(float x, float y, float z) {
 }
 
 void Renderer::startTiledRender(std::uint8_t* pixels, float x, float y, float z, ThreadPool& pool, int tileWidth, int tileHeight) {
-    // Bump render version to cancel any existing work; clear queued tasks
-    const std::uint64_t version = ctx->renderVersion.fetch_add(1) + 1;
-    ctx->inProgress.store(true);
-    ctx->tilesCompleted.store(0);
-    ctx->tileWidth = tileWidth;
-    ctx->tileHeight = tileHeight;
-
-    pool.clear();
-
-    static float angle = 0.f;
-    angle += .1f;
-    const float angleCopy = angle;
-    const Vector3 eyePos = ctx->camPos;
-
-    const float yaw = ctx->yaw;
-    const float pitch = ctx->pitch;
-    Mat3 R = Mat3::fromYawPitch(yaw, pitch);
-    Vector3 forward = R.mul(Vector3(0.f,0.f,1.f)).normalize();
-    Vector3 right   = R.mul(Vector3(1.f,0.f,0.f)).normalize();
-    Vector3 up      = R.mul(Vector3(0.f,1.f,0.f)).normalize();
-    const float fov_rad = ctx->screen->fov_y_deg * 3.1415926535f / 180.0f;
-    const float plane_h = 2.0f * z * std::tan(fov_rad * 0.5f);
-    const float plane_w = plane_h * ctx->screen->aspect;
-    const float px_size_x = plane_w / ctx->screen->resolution_x;
-    const float px_size_y = plane_h / ctx->screen->resolution_y;
-    Vector3 center = eyePos + forward * z + right * x + up * y;
-    Vector3 top_left = center - right * (plane_w * 0.5f) - up * (plane_h * 0.5f);
-    ctx->screen->position = top_left;
-    const int width = static_cast<int>(ctx->screen->resolution_x);
-    const int height = static_cast<int>(ctx->screen->resolution_y);
-    const Vector3 screen_pos = top_left;
-
-    ctx->tilesX = (width + tileWidth - 1) / tileWidth;
-    ctx->tilesY = (height + tileHeight - 1) / tileHeight;
-    ctx->totalTiles = ctx->tilesX * ctx->tilesY;
-
-    for (int ty = 0; ty < ctx->tilesY; ++ty) {
-        for (int tx = 0; tx < ctx->tilesX; ++tx) {
-            const int x0 = tx * tileWidth;
-            const int y0 = ty * tileHeight;
-            const int w = std::min(tileWidth, width - x0);
-            const int h = std::min(tileHeight, height - y0);
-            pool.enqueue([this, pixels, x0, y0, w, h, width, px_size_x, px_size_y,
-                          screen_pos, angleCopy, eyePos, version, right, up]() {
-                // Ensure this task is for the current render
-                if (ctx->renderVersion.load() != version) return;
-                Vector3 light(std::cos(angleCopy) * 5.f, 0.f, std::sin(angleCopy) * 5.f);
-                if (ctx->renderVersion.load() != version) return;
-                // Render interior first (keeps outline visible)
-                TileRenderer::renderTileInterior(pixels, width, x0, y0, w, h, screen_pos,
-                                                 px_size_x, px_size_y, eyePos, *ctx->model,
-                                                 light, right, up);
-                if (ctx->renderVersion.load() != version) return;
-                // Replace outline with shaded border
-                TileRenderer::renderTileBorderShaded(pixels, width, x0, y0, w, h, screen_pos,
-                                                     px_size_x, px_size_y, eyePos, *ctx->model,
-                                                     light, right, up);
-                if (ctx->renderVersion.load() != version) return;
-                int done = ++ctx->tilesCompleted;
-                if (done >= ctx->totalTiles) {
-                    ctx->inProgress.store(false);
-                }
-            });
-        }
-    }
+    std::uint64_t version = RenderHelpers::beginRender(ctx, pool, tileWidth, tileHeight);
+    RenderHelpers::RenderSetup setup = RenderHelpers::computeRenderSetup(ctx, x, y, z);
+    RenderHelpers::updateTileGrid(ctx, setup.width, setup.height, tileWidth, tileHeight);
+    RenderHelpers::enqueueTiles(ctx, pool, pixels, setup, version);
 }
 
 bool Renderer::isRenderFinished() const { return !ctx->inProgress.load() && ctx->totalTiles > 0 && ctx->tilesCompleted.load() >= ctx->totalTiles; }

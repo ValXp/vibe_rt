@@ -22,6 +22,7 @@ public:
     void setCameraPosition(float x, float y, float z);
 
 private:
+    friend struct RenderHelpers;
     struct Context;
     Context* ctx;
 };
